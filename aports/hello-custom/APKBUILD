@@ -1,0 +1,20 @@
+maintainer="ElliNet13 <ellinet13@ellinet13.com>"
+pkgname=hello-custom
+pkgver=1.0.0
+pkgrel=0
+pkgdesc="Example package from my custom Alpine repository"
+url="https://ellinet13.com"
+arch="noarch"
+license="GPL-3.0-or-later"
+options="!check"
+
+package() {
+    install -d "$pkgdir/usr/bin"
+
+    cat > "$pkgdir/usr/bin/hello-custom" <<'EOF'
+#!/bin/sh
+echo "Hello from my custom Alpine repository!"
+EOF
+
+    chmod 755 "$pkgdir/usr/bin/hello-custom"
+}
