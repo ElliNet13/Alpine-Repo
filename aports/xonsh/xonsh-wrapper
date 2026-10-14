@@ -1,0 +1,7 @@
+#!/bin/sh
+# Runs the real entry script with xonsh's version-independent module dir on the path.
+name=${0##*/}
+export PYTHONPATH="/usr/lib/xonsh${PYTHONPATH:+:$PYTHONPATH}"
+exec "/usr/libexec/xonsh/$name" "$@"
+
+# This wrapper exists because python stuff is weird with Alpine

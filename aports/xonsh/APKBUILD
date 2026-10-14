@@ -1,0 +1,55 @@
+# Contributor: ElliNet13
+# Maintainer: ElliNet13 <ellinet13@ellinet13.com>
+
+pkgname=xonsh
+pkgver=0.24.2
+pkgrel=0
+pkgdesc="Python-powered shell"
+url="https://xon.sh/"
+arch="noarch"
+license="custom"
+# Declared by hand: with tracedeps off, abuild will not add python3~3.X for us.
+depends="python3>=3.11"
+makedepends="py3-gpep517 py3-setuptools py3-wheel"
+# !tracedeps stops abuild from pinning the package to the build container's Python.
+options="!check !tracedeps"
+
+# Build directly from the local Git submodule.
+builddir="$startdir/src/xonsh"
+
+build() {
+	cd "$builddir"
+	# If pyproject.toml uses another backend (e.g. hatchling), add its py3-* package to makedepends.
+	gpep517 build-wheel --wheel-dir .dist --output-fd 3 3>&1 >&2
+}
+
+package() {
+	cd "$builddir"
+
+	gpep517 install-wheel --destdir "$pkgdir" --prefix /usr .dist/*.whl
+
+	# Move the modules out of the Python-version-specific directory.
+	mkdir -p "$pkgdir"/usr/lib/xonsh
+	mv "$pkgdir"/usr/lib/python3*/site-packages/* "$pkgdir"/usr/lib/xonsh/
+	rm -rf "$pkgdir"/usr/lib/python3*
+	find "$pkgdir"/usr/lib/xonsh -name __pycache__ -type d -prune -exec rm -rf {} +
+
+	# Move the generated entry-point scripts aside and put the wrapper in their place.
+	mkdir -p "$pkgdir"/usr/libexec/xonsh
+	for script in "$pkgdir"/usr/bin/*; do
+		name=${script##*/}
+		mv "$script" "$pkgdir"/usr/libexec/xonsh/"$name"
+		install -Dm755 "$startdir"/xonsh-wrapper "$pkgdir"/usr/bin/"$name"
+	done
+
+	# Preserve the upstream license and copyright notices.
+	if [ -f LICENSE ]; then
+		install -Dm644 LICENSE \
+			"$pkgdir/usr/share/licenses/xonsh/LICENSE"
+	elif [ -f COPYING ]; then
+		install -Dm644 COPYING \
+			"$pkgdir/usr/share/licenses/xonsh/LICENSE"
+	else
+		error "Upstream LICENSE or COPYING file not found"
+	fi
+}

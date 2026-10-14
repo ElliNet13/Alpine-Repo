@@ -35,6 +35,6 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        printf '%s\n' 'http://web:8080/v3' > /etc/apk/repositories
+        printf '%s\n' 'http://web:8080/v3' >> /etc/apk/repositories
         apk update
         exec /bin/sh

@@ -13,6 +13,7 @@ PRIVATE_KEY="$KEYS/repo.rsa"
 PUBLIC_KEY="$KEYS/repo.rsa.pub"
 
 TMP_DIR=""
+BUILD_TMP_DIR=""
 
 die() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -22,6 +23,10 @@ die() {
 cleanup() {
     if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
         rm -rf -- "$TMP_DIR"
+    fi
+
+    if [[ -n "$BUILD_TMP_DIR" && -d "$BUILD_TMP_DIR" ]]; then
+        rm -rf -- "$BUILD_TMP_DIR"
     fi
 }
 
@@ -223,11 +228,16 @@ index() {
     printf '\nRepository indexing complete.\n'
 }
 
-# Build one package and publish its artifacts.
-# Indexing is performed separately after all requested builds finish.
+# Build one package in an isolated temporary workspace.
+#
+# IMPORTANT:
+# Never run abuild directly inside the original APORTS directory.
+# abuild cleans srcdir, which may contain Git submodules or other
+# source files that must survive the build.
 build_one() {
     local package="$1"
     local source_dir
+    local build_dir
     local file
     local pkg_name
     local -a built=()
@@ -239,10 +249,47 @@ build_one() {
 
     printf '\n========== Building %s ==========\n' "$package"
 
+    BUILD_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/abuild-${package}.XXXXXX")"
+    build_dir="$BUILD_TMP_DIR/$package"
+
+    mkdir -p "$build_dir"
+    cp -a "$source_dir/." "$build_dir/"
+
+    # Remove Git metadata from the disposable copy only.
+    find "$build_dir" -name .git -type f -delete
+    find "$build_dir" -depth -name .git -type d -prune -exec rm -rf -- {} +
+
+    # Xonsh has a pre-populated source submodule in src/xonsh.
+    # abuild cleans srcdir before changing to builddir, so move
+    # the build source outside srcdir in the disposable workspace.
+    if [[ "$package" == "xonsh" ]]; then
+        [[ -d "$build_dir/src/xonsh" ]] ||
+            die "Xonsh source missing from $build_dir/src/xonsh"
+
+        cp -a "$build_dir/src/xonsh" "$build_dir/xonsh-source"
+
+        # Redirect the custom build directory away from srcdir.
+        if grep -qE '^[[:space:]]*builddir=' "$build_dir/APKBUILD"; then
+            sed -i \
+                's|^[[:space:]]*builddir=.*|builddir="$startdir/xonsh-source"|' \
+                "$build_dir/APKBUILD"
+        else
+            die "Xonsh APKBUILD has no explicit builddir assignment; inspect APKBUILD before building."
+        fi
+
+        printf 'Preserved Xonsh build source outside srcdir.\n'
+    fi
+
+    printf 'Original sources: %s\n' "$source_dir"
+    printf 'Isolated workspace: %s\n' "$build_dir"
+
     (
-        cd "$source_dir"
+        cd "$build_dir"
         abuild -F -r
     )
+
+    rm -rf -- "$BUILD_TMP_DIR"
+    BUILD_TMP_DIR=""
 
     while IFS= read -r -d '' file; do
         pkg_name="$(get_package_name "$file")"
@@ -395,7 +442,7 @@ case "${1:-}" in
         printf '  %s keygen\n' "$0" >&2
         printf '  %s index\n' "$0" >&2
         printf '  %s build PACKAGE_NAME [PACKAGE_NAME ...]\n' "$0" >&2
-        printf '  %s build-all [--exclude PACKAGE]... \n' "$0" >&2
+        printf '  %s build-all [--exclude PACKAGE]...\n' "$0" >&2
         exit 2
         ;;
 esac
