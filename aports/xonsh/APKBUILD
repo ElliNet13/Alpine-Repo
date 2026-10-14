@@ -17,6 +17,21 @@ options="!check !tracedeps"
 # Build directly from the local Git submodule.
 builddir="$startdir/src/xonsh"
 
+subpackages="$pkgname-full:_full:noarch"
+_full() {
+	pkgdesc="$pkgdesc (with optional dependencies)"
+	depends="$pkgname=$pkgver-r$pkgrel
+		py3-prompt_toolkit
+		py3-pygments
+		py3-pyperclip
+		py3-psutil
+		py3-setproctitle
+		py3-ujson
+		py3-distro
+		"
+	mkdir -p "$subpkgdir"
+}
+
 build() {
 	cd "$builddir"
 	# If pyproject.toml uses another backend (e.g. hatchling), add its py3-* package to makedepends.

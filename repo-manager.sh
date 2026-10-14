@@ -77,6 +77,20 @@ get_package_name() {
         head -n 1
 }
 
+# The origin is the name of the APKBUILD a package came from. Subpackages
+# (-full, -doc, -pyc, ...) have a different pkgname but share the origin.
+get_package_origin() {
+    local archive="$1"
+    local metadata
+
+    metadata="$(tar -xOzf "$archive" .PKGINFO 2>/dev/null)" ||
+        die "Cannot read .PKGINFO from $archive"
+
+    printf '%s\n' "$metadata" |
+        sed -n 's/^origin = //p' |
+        head -n 1
+}
+
 validate_arches() {
     local arch
     local -A seen=()
@@ -239,7 +253,7 @@ build_one() {
     local source_dir
     local build_dir
     local file
-    local pkg_name
+    local pkg_origin
     local -a built=()
 
     source_dir="$APORTS/$package"
@@ -291,10 +305,13 @@ build_one() {
     rm -rf -- "$BUILD_TMP_DIR"
     BUILD_TMP_DIR=""
 
+    # Collect the main package and every subpackage built from this APKBUILD.
+    # Subpackages (e.g. xonsh-full) have a different pkgname but the same
+    # origin, so match on origin rather than pkgname.
     while IFS= read -r -d '' file; do
-        pkg_name="$(get_package_name "$file")"
+        pkg_origin="$(get_package_origin "$file")"
 
-        if [[ "$pkg_name" == "$package" ]]; then
+        if [[ "$pkg_origin" == "$package" ]]; then
             built+=("$file")
         fi
     done < <(
