@@ -6,5 +6,6 @@ docker compose --profile admin run --rm manager build-all # Build all packages
 docker compose --profile admin run --rm manager index # Publish the repository index, it is automatically built when packages are built
 
 docker compose up -d web # Start the web server
+docker compose restart web # Restart the web server
 
 docker compose --profile admin run --rm tester # Test the repo

@@ -2,5 +2,5 @@
 keys/*
 !keys/.gitkeep
 
-repo/*
+repo/v3/
 !repo/.gitkeep
