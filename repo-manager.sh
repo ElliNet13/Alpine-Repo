@@ -200,7 +200,7 @@ index_one() {
     TMP_DIR=""
 
     chmod 0755 "$arch_dir"
-    chmod 0644 "$arch_dir"/./*.apk "$arch_dir/APKINDEX.tar.gz"
+    chmod 0644 "$arch_dir"/*.apk "$arch_dir/APKINDEX.tar.gz"
 
     printf 'Published index: %s/APKINDEX.tar.gz\n' "$arch_dir"
 }
@@ -211,8 +211,6 @@ index() {
     configure_signing
     validate_arches
 
-    # Repair permissions on the existing repository, including
-    # directories and files created by older versions of this script.
     install -d -m 0755 "$REPO"
     fix_repository_permissions
 
@@ -220,34 +218,31 @@ index() {
         index_one "$arch"
     done
 
-    # Run once more so all published content has consistent permissions.
     fix_repository_permissions
 
     printf '\nRepository indexing complete.\n'
 }
 
-build() {
-    local package="${1:-}"
+# Build one package and publish its artifacts.
+# Indexing is performed separately after all requested builds finish.
+build_one() {
+    local package="$1"
     local source_dir
     local file
     local pkg_name
     local -a built=()
-
-    [[ -n "$package" ]] || die "Usage: build PACKAGE_NAME"
 
     source_dir="$APORTS/$package"
 
     [[ -f "$source_dir/APKBUILD" ]] ||
         die "APKBUILD not found: $source_dir/APKBUILD"
 
-    configure_signing
-    validate_arches
+    printf '\n========== Building %s ==========\n' "$package"
 
-    cd "$source_dir"
-
-    printf 'Building %s...\n' "$package"
-
-    abuild -F -r
+    (
+        cd "$source_dir"
+        abuild -F -r
+    )
 
     while IFS= read -r -d '' file; do
         pkg_name="$(get_package_name "$file")"
@@ -266,22 +261,141 @@ build() {
         publish_package "$file"
     done
 
+    printf 'Finished building %s.\n' "$package"
+}
+
+# Build one or more explicitly named packages.
+build() {
+    local package
+
+    (($# > 0)) || die "Usage: build PACKAGE_NAME [PACKAGE_NAME ...]"
+
+    configure_signing
+    validate_arches
+
+    for package in "$@"; do
+        [[ "$package" =~ ^[a-zA-Z0-9_.+-]+$ ]] ||
+            die "Invalid package name: $package"
+
+        build_one "$package"
+    done
+
+    index
+}
+
+# Build every package directory under APORTS, except excluded packages.
+#
+# Usage:
+#   build-all
+#   build-all --exclude PACKAGE
+#   build-all --exclude PACKAGE1 --exclude PACKAGE2
+#   build-all -e PACKAGE1 -e PACKAGE2
+build_all() {
+    local arg
+    local package
+    local directory
+    local -A excluded=()
+    local -a directories=()
+    local -a packages=()
+
+    while (($# > 0)); do
+        arg="$1"
+        shift
+
+        case "$arg" in
+            --exclude|-e)
+                (($# > 0)) ||
+                    die "Missing package name after $arg"
+
+                package="$1"
+                shift
+
+                [[ "$package" =~ ^[a-zA-Z0-9_.+-]+$ ]] ||
+                    die "Invalid excluded package name: $package"
+
+                excluded["$package"]=1
+                ;;
+            --)
+                (($# == 0)) ||
+                    die "Unexpected arguments after --: $*"
+                ;;
+            -*)
+                die "Unknown build-all option: $arg"
+                ;;
+            *)
+                die "Unexpected argument '$arg'. Use --exclude PACKAGE."
+                ;;
+        esac
+    done
+
+    [[ -d "$APORTS" ]] ||
+        die "APORTS directory not found: $APORTS"
+
+    configure_signing
+    validate_arches
+
+    # Only consider immediate child directories containing APKBUILD.
+    shopt -s nullglob
+    directories=("$APORTS"/*/)
+    shopt -u nullglob
+
+    for directory in "${directories[@]}"; do
+        [[ -f "$directory/APKBUILD" ]] || continue
+
+        package="${directory%/}"
+        package="${package##*/}"
+
+        if [[ -n "${excluded[$package]:-}" ]]; then
+            printf 'Excluding package: %s\n' "$package"
+            continue
+        fi
+
+        packages+=("$package")
+    done
+
+    ((${#packages[@]} > 0)) ||
+        die "No packages to build under $APORTS after applying exclusions."
+
+    printf 'Packages to build: %d\n' "${#packages[@]}"
+
+    local succeeded=0
+
+    for package in "${packages[@]}"; do
+        build_one "$package"
+        ((succeeded += 1))
+    done
+
+    printf '\nBuilt and published %d packages.\n' "$succeeded"
+
+    # Index once after all packages have been published.
     index
 }
 
 case "${1:-}" in
     keygen)
+        shift
+        (($# == 0)) || die "Usage: keygen"
         keygen
         ;;
     index)
+        shift
+        (($# == 0)) || die "Usage: index"
         index
         ;;
     build)
         shift
         build "$@"
         ;;
+    build-all)
+        shift
+        build_all "$@"
+        ;;
     *)
-        printf 'Usage: %s {keygen|index|build PACKAGE_NAME}\n' "$0" >&2
+        printf 'Usage:\n' >&2
+        printf '  %s keygen\n' "$0" >&2
+        printf '  %s index\n' "$0" >&2
+        printf '  %s build PACKAGE_NAME [PACKAGE_NAME ...]\n' "$0" >&2
+        printf '  %s build-all [--exclude PACKAGE]... \n' "$0" >&2
         exit 2
         ;;
 esac
